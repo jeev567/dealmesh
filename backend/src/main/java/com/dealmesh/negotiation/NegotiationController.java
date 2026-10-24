@@ -13,7 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class NegotiationController {
  private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
  private final NegotiationService service;
- public NegotiationController(NegotiationService service) { this.service=service; }
+ private final OpenAiNegotiationService ai;
+ public NegotiationController(NegotiationService service, OpenAiNegotiationService ai) {
+   this.service=service; this.ai=ai;
+ }
 
  public record CreateRequest(@NotBlank String title, @Min(1) int budget,
    @Min(1) @Max(365) int days, @Min(0) @Max(20) int revisions) {}
@@ -27,6 +30,18 @@ public class NegotiationController {
    Session session=service.create(id,req);
    sessions.put(id,session);
    return ResponseEntity.status(HttpStatus.CREATED).body(session);
+ }
+ @PostMapping("/{id}/generate-offers")
+ public Session generateOffers(@PathVariable UUID id) {
+   Session existing=get(id);
+   if(!existing.status().equals("CREATED")) {
+     throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT,"Offers already generated");
+   }
+   List<Offer> offers=ai.generate(new CreateRequest(existing.title(),existing.budget(),existing.days(),existing.revisions()));
+   Session updated=new Session(id,existing.title(),existing.budget(),existing.days(),existing.revisions(),
+     offers.isEmpty()?"NO_MATCH":"OFFERS_READY",offers);
+   sessions.put(id,updated);
+   return updated;
  }
  @GetMapping("/{id}")
  public Session get(@PathVariable UUID id) {
