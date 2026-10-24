@@ -21,6 +21,7 @@ public class NegotiationController {
  public record CreateRequest(@NotBlank String title, @Min(1) int budget,
    @Min(1) @Max(365) int days, @Min(0) @Max(20) int revisions) {}
  public record Offer(String seller, int price, int days, int revisions, String explanation) {}
+ public record Round(int number, String seller, String speaker, String message, Integer price, Integer days, Integer revisions) {}
  public record Session(UUID id, String title, int budget, int days, int revisions,
    String status, List<Offer> offers) {}
 
@@ -42,6 +43,21 @@ public class NegotiationController {
      offers.isEmpty()?"NO_MATCH":"OFFERS_READY",offers);
    sessions.put(id,updated);
    return updated;
+ }
+ @GetMapping("/{id}/rounds")
+ public List<Round> rounds(@PathVariable UUID id) {
+   Session session=get(id);
+   if(!session.status().equals("OFFERS_READY")) return List.of();
+   List<Round> transcript=new ArrayList<>();
+   int round=1;
+   for(Offer offer:session.offers()) {
+     transcript.add(new Round(round++,offer.seller(),"SELLER",
+       offer.explanation(),offer.price(),offer.days(),offer.revisions()));
+     transcript.add(new Round(round++,offer.seller(),"BUYER",
+       "This offer satisfies the stated budget, delivery deadline and revision requirements. Recommend for human review.",
+       offer.price(),offer.days(),offer.revisions()));
+   }
+   return transcript;
  }
  @GetMapping("/{id}")
  public Session get(@PathVariable UUID id) {
