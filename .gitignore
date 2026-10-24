@@ -1,6 +1,36 @@
+# Secrets and local application configuration
+**/application-local.yml
+**/application-local.yaml
+**/application-*.local.yml
+**/application-*.local.yaml
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Frontend
 node_modules/
 dist/
-.env
-.env.local
+coverage/
+*.tsbuildinfo
+
+# Java / Gradle
+.gradle/
+build/
+out/
+*.class
+*.log
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# IDE / OS
 .idea/
+*.iml
+.vscode/
 .DS_Store
+Thumbs.db
