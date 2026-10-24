@@ -23,3 +23,5 @@ export async function getRounds(id: string): Promise<NegotiationRound[]> {
   if (!response.ok) throw new Error('Unable to load negotiation transcript');
   return response.json() as Promise<NegotiationRound[]>;
 }
+
+export const negotiate = (id: string) => post<Negotiation>('/api/negotiations/'+encodeURIComponent(id)+'/negotiate');
