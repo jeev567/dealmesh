@@ -29,6 +29,67 @@ public class OpenAiNegotiationService {
    this.apiKey=apiKey; this.model=model; this.mapper=mapper; this.policy=policy;
  }
 
+ public record NegotiationTurn(String seller, String speaker, String message,
+   int price, int days, int revisions, int round) {}
+ public record NegotiationResult(List<Offer> offers, List<NegotiationTurn> turns) {}
+
+ public NegotiationResult negotiate(CreateRequest buyer) {
+   if(apiKey.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"OPENAI_API_KEY is not configured");
+   List<Offer> winners=new ArrayList<>();
+   List<NegotiationTurn> turns=new ArrayList<>();
+   for(SellerPolicy seller:policy.sellers()) {
+     Offer current=propose(buyer,seller);
+     for(int round=1;round<=4;round++) {
+       if(!policy.isWithinSellerPolicy(current,seller)) {
+         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+           "Seller proposal rejected by policy validation.",current.price(),current.days(),current.revisions(),round));
+         break;
+       }
+       turns.add(new NegotiationTurn(seller.name(),"SELLER",current.explanation(),
+         current.price(),current.days(),current.revisions(),round));
+       if(policy.isAcceptable(buyer,current,seller.minimumPrice())) {
+         winners.add(current);
+         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+           "Offer meets both parties' constraints. Awaiting human review.",
+           current.price(),current.days(),current.revisions(),round));
+         break;
+       }
+       if(round==4) {
+         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+           "Negotiation ended without a compatible offer.",current.price(),current.days(),current.revisions(),round));
+         break;
+       }
+       Offer counter=agentProposal(buyer,seller,current,"BUYER");
+       if(counter.price()<1 || counter.price()>buyer.budget() || counter.days()<1 ||
+          counter.days()>buyer.days() || counter.revisions()<buyer.revisions() ||
+          counter.revisions()>20) {
+         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+           "Buyer agent proposal rejected by buyer constraints.",counter.price(),counter.days(),counter.revisions(),round));
+         break;
+       }
+       turns.add(new NegotiationTurn(seller.name(),"BUYER",counter.explanation(),
+         counter.price(),counter.days(),counter.revisions(),round));
+       current=agentProposal(buyer,seller,counter,"SELLER");
+     }
+   }
+   winners.sort(Comparator.comparingInt(Offer::price).thenComparingInt(Offer::days));
+   return new NegotiationResult(List.copyOf(winners),List.copyOf(turns));
+ }
+
+ private Offer agentProposal(CreateRequest buyer,SellerPolicy seller,Offer previous,String role) {
+   String instruction=role.equals("BUYER")
+     ? "You are a fictional BUYER agent. Counter the seller's latest offer with price <= buyer budget, delivery <= buyer deadline, and revisions >= buyer minimum. Negotiate for a lower price. Never commit or approve a purchase."
+     : "You are a fictional SELLER agent. Respond to the buyer counteroffer. You MUST respect your minimum price, earliest delivery time and maximum revisions. You may compromise but never violate seller constraints.";
+   return requestOffer(seller.name(),instruction,
+     "Project: "+buyer.title()+". Buyer maximum USD "+buyer.budget()+", deadline "+buyer.days()+
+     " days, minimum revisions "+buyer.revisions()+". Seller "+seller.name()+
+     " asks USD "+seller.askingPrice()+", minimum USD "+seller.minimumPrice()+
+     ", earliest "+seller.minimumDays()+" days, maximum "+seller.maxRevisions()+
+     " revisions. Latest proposal: USD "+previous.price()+", "+previous.days()+
+     " days, "+previous.revisions()+" revisions. Latest explanation: "+previous.explanation()+
+     ". Propose your next terms in JSON; explanation must be concise.");
+ }
+
  public List<Offer> generate(CreateRequest request) {
    if(apiKey.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
      "OPENAI_API_KEY is not configured");
@@ -44,23 +105,24 @@ public class OpenAiNegotiationService {
  }
 
  private Offer propose(CreateRequest buyer,SellerPolicy seller) {
-   try {
-     ObjectNode payload=mapper.createObjectNode();
-     payload.put("model",model);
-     payload.put("temperature",0.3);
-     var messages=payload.putArray("messages");
-     messages.addObject().put("role","system").put("content",
-       "You are a fictional seller negotiation agent in a DEMO marketplace. "+
-       "Propose one commercially reasonable offer. Never invent capabilities or guarantees. "+
-       "Return only the required JSON object. The server will independently validate all terms.");
-     String prompt="Buyer project: "+buyer.title()+"; maximum budget USD "+buyer.budget()+
+   return requestOffer(seller.name(),
+     "You are a fictional seller negotiation agent in a DEMO marketplace. Propose one commercially reasonable offer. Never invent capabilities or guarantees. Return only the required JSON object. The server independently validates all terms.",
+     "Buyer project: "+buyer.title()+"; maximum budget USD "+buyer.budget()+
        "; maximum delivery days "+buyer.days()+"; minimum revisions "+buyer.revisions()+
        ". Seller: "+seller.name()+"; asking price USD "+seller.askingPrice()+
        "; HARD minimum price USD "+seller.minimumPrice()+
        "; HARD minimum delivery days "+seller.minimumDays()+
        "; HARD maximum revisions "+seller.maxRevisions()+
-       ". Offer feasible terms within BOTH parties' constraints. If impossible, return the seller's "+
-       "minimum acceptable terms even if buyer constraints are not met. Explanation <= 140 chars.";
+       ". Offer feasible terms within BOTH parties' constraints. If impossible, return the seller's minimum acceptable terms. Explanation <= 140 chars.");
+ }
+
+ private Offer requestOffer(String sellerName,String instruction,String prompt) {
+   try {
+     ObjectNode payload=mapper.createObjectNode();
+     payload.put("model",model);
+     payload.put("temperature",0.3);
+     var messages=payload.putArray("messages");
+     messages.addObject().put("role","system").put("content",instruction);
      messages.addObject().put("role","user").put("content",prompt);
      ObjectNode format=payload.putObject("response_format").put("type","json_schema");
      ObjectNode schemaDef=format.putObject("json_schema");
@@ -87,7 +149,7 @@ public class OpenAiNegotiationService {
      String content=root.path("choices").path(0).path("message").path("content").asText("");
      if(content.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"AI provider returned no offer");
      JsonNode offer=mapper.readTree(content);
-     return new Offer(seller.name(),offer.path("price").asInt(-1),offer.path("days").asInt(-1),
+     return new Offer(sellerName,offer.path("price").asInt(-1),offer.path("days").asInt(-1),
        offer.path("revisions").asInt(-1),offer.path("explanation").asText(""));
    } catch(ResponseStatusException e) { throw e; }
      catch(InterruptedException e) {
