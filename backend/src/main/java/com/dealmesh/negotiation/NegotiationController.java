@@ -14,6 +14,7 @@ public class NegotiationController {
  private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
  private final NegotiationService service;
  private final OpenAiNegotiationService ai;
+ private final Map<UUID,List<Round>> transcripts = new ConcurrentHashMap<>();
  public NegotiationController(NegotiationService service, OpenAiNegotiationService ai) {
    this.service=service; this.ai=ai;
  }
@@ -44,9 +45,29 @@ public class NegotiationController {
    sessions.put(id,updated);
    return updated;
  }
+ @PostMapping("/{id}/negotiate")
+ public synchronized Session negotiate(@PathVariable UUID id) {
+   Session existing=get(id);
+   if(!existing.status().equals("CREATED")) {
+     throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT,"Negotiation already processed");
+   }
+   var result=ai.negotiate(new CreateRequest(existing.title(),existing.budget(),existing.days(),existing.revisions()));
+   List<Round> transcript=new ArrayList<>();
+   int sequence=1;
+   for(var turn:result.turns()) {
+     transcript.add(new Round(sequence++,turn.seller(),turn.speaker(),turn.message(),
+       turn.price(),turn.days(),turn.revisions()));
+   }
+   Session updated=new Session(id,existing.title(),existing.budget(),existing.days(),existing.revisions(),
+     result.offers().isEmpty()?"NO_MATCH":"OFFERS_READY",result.offers());
+   transcripts.put(id,List.copyOf(transcript));
+   sessions.put(id,updated);
+   return updated;
+ }
  @GetMapping("/{id}/rounds")
  public List<Round> rounds(@PathVariable UUID id) {
    Session session=get(id);
+   if(transcripts.containsKey(id)) return transcripts.get(id);
    if(!session.status().equals("OFFERS_READY")) return List.of();
    List<Round> transcript=new ArrayList<>();
    int round=1;
