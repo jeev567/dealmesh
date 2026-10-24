@@ -16,3 +16,10 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 export const createNegotiation = (request: Requirements) => post<Negotiation>('/api/negotiations',request);
 export const generateOffers = (id: string) => post<Negotiation>('/api/negotiations/'+encodeURIComponent(id)+'/generate-offers');
+
+export type NegotiationRound = { number: number; seller: string; speaker: 'BUYER'|'SELLER'; message: string; price: number|null; days: number|null; revisions: number|null };
+export async function getRounds(id: string): Promise<NegotiationRound[]> {
+  const response = await fetch(API + '/api/negotiations/' + encodeURIComponent(id) + '/rounds');
+  if (!response.ok) throw new Error('Unable to load negotiation transcript');
+  return response.json() as Promise<NegotiationRound[]>;
+}
