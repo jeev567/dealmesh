@@ -55,7 +55,7 @@ public class PaypalSandboxController {
      var request=client.method(org.springframework.http.HttpMethod.valueOf(method)).uri(BASE+path)
        .headers(h->{h.setBearerAuth(token);h.setContentType(MediaType.APPLICATION_JSON);
          if(requestId!=null)h.set("PayPal-Request-Id",requestId);});
-     JsonNode json=request.body(body==null?"":body).retrieve().body(JsonNode.class);
+     JsonNode json=body==null ? request.retrieve().body(JsonNode.class) : request.body(body).retrieve().body(JsonNode.class);
      if(json==null)throw new IllegalStateException("Empty PayPal response");
      return json;
    } catch(Exception e) {throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"PayPal Sandbox request failed; check backend logs",e);}
@@ -115,7 +115,7 @@ public class PaypalSandboxController {
        String url=link.path("href").asText("");
        try {
          URI uri=URI.create(url);
-         if("https".equals(uri.getScheme())&&("www.sandbox.paypal.com".equals(uri.getHost())||"www.paypal.com".equals(uri.getHost())))
+         if("https".equals(uri.getScheme())&&("www.sandbox.paypal.com".equals(uri.getHost())))
            return url;
        } catch(Exception ignored) {}
      }
