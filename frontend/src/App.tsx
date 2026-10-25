@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { createNegotiation, negotiate, getRounds, type NegotiationRound, type AiOffer } from './api';
+import { useEffect, useRef, useState } from 'react';
+import { createNegotiation, startNegotiation, getNegotiation, getNegotiationError, getRounds, type NegotiationRound, type AiOffer } from './api';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleDollarSign, Clock3, Command, Compass, CreditCard, FileCheck2, LayoutDashboard, Menu, MessageSquareText, Plus, Search, ShieldCheck, Sparkles, TrendingDown, Users, Wallet, X, Zap } from 'lucide-react';
 
@@ -17,6 +17,8 @@ const navigation: { name: View; icon: typeof LayoutDashboard }[] = [
 ];
 export default function App() {
   const [view, setView] = useState<View>('Overview');
+  const pollRef = useRef<number | null>(null);
+  useEffect(() => () => { if (pollRef.current !== null) window.clearInterval(pollRef.current); }, []);
   const [menu, setMenu] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [request, setRequest] = useState({ title: 'Modern business website', budget: '2000', days: '14', revisions: '2' });
@@ -31,16 +33,44 @@ export default function App() {
   const [toast, setToast] = useState('');
   const notify = (s: string) => { setToast(s); window.setTimeout(() => setToast(''), 3400); };
   const start = async () => {
+    if (pollRef.current !== null) window.clearInterval(pollRef.current);
     setActiveRequest(request); setRound(1); setShowCreate(false); setView('Negotiations');
     setAiStatus('loading'); setAiOffers([]); setRealRounds([]); setAiError('');
     try {
       const created = await createNegotiation({title:request.title,budget:Number(request.budget),days:Number(request.days),revisions:Number(request.revisions)});
-      const result = await negotiate(created.id);
-      const transcript = await getRounds(created.id);
-      setAiOffers(result.offers);
-      setRealRounds(transcript);
-      setAiStatus(result.offers.length ? 'ready' : 'no-match');
-    } catch (error) {
+      await startNegotiation(created.id);
+      let inFlight = false;
+      const started = Date.now();
+      const poll = async () => {
+        if (inFlight) return;
+        inFlight = true;
+        try {
+          const [result, transcript] = await Promise.all([getNegotiation(created.id),getRounds(created.id)]);
+          setRealRounds(transcript);
+          setRound(transcript.length || 1);
+          if (result.status !== 'RUNNING') {
+            if (pollRef.current !== null) window.clearInterval(pollRef.current);
+            pollRef.current = null;
+            if (result.status === 'FAILED') throw new Error(await getNegotiationError(created.id));
+            setAiOffers(result.offers);
+            setAiStatus(result.offers.length ? 'ready' : 'no-match');
+          } else if (Date.now() - started > 180000) {
+            throw new Error('Negotiation is taking longer than expected. Check the backend logs.');
+          }
+        } catch(error) {
+          if (pollRef.current !== null) window.clearInterval(pollRef.current);
+          pollRef.current = null;
+          setAiStatus('error');
+          setAiError(error instanceof Error ? error.message : 'Unable to connect to the backend');
+        } finally { inFlight = false; }
+      };
+      await poll();
+      if (pollRef.current === null && Date.now()-started < 180000) {
+        // Only schedule more polls while the negotiation is still running.
+        const status = await getNegotiation(created.id);
+        if (status.status === 'RUNNING') pollRef.current = window.setInterval(poll,1200);
+      }
+    } catch(error) {
       setAiStatus('error');
       setAiError(error instanceof Error ? error.message : 'Unable to connect to the backend');
     }
@@ -68,7 +98,7 @@ export default function App() {
           <div className="seller-grid">{sellers.map(s => <SellerCard key={s.id} seller={s} onSelect={() => {setSelectedSeller(s.id);changeView('Marketplace');}}/>)}</div>
         </>}
         {view === 'Marketplace' && <><PageHead kicker="DISCOVER TALENT" title="Find your perfect match" desc="Explore curated demo seller profiles and compare what they offer." action={() => setShowCreate(true)}/><div className="searchbar"><Search size={19}/><input aria-label="Search sellers" placeholder="Search sellers or specialties..." value={search} onChange={e => setSearch(e.target.value)}/></div><div className="seller-grid marketplace-grid">{filtered.map(s => <SellerCard key={s.id} seller={s} onSelect={() => {setSelectedSeller(s.id);setShowCreate(true);}}/>)}</div>{filtered.length===0&&<div className="empty">No sellers match your search.</div>}<p className="disclaimer">All seller profiles and pricing are fictional demonstration data.</p></>}
-        {view === 'Negotiations' && <><PageHead kicker="AI NEGOTIATION LAB" title="Where better deals happen" desc="Review multi-round buyer and seller agent proposals and validated terms before any human decision." action={() => setShowCreate(true)}/><div className="negotiation-layout"><section className="panel negotiation-panel"><div className="panel-header"><div className="agent-title"><span className="agent-icon"><Bot size={20}/></span><span><strong>Negotiation workspace</strong><small>Multi-round AI negotiation transcript</small></span></div><span className="status"><span/> DEMO</span></div><div className="ai-results"><div className="ai-results-head"><Sparkles size={16}/> REAL AI SELLER OFFERS</div>{aiStatus==='loading' && <p role="status">Buyer and seller AI agents are negotiating. This may take a minute…</p>}{aiStatus==='error' && <p role="alert">AI request failed: {aiError}. Check the Spring Boot server and OpenAI configuration.</p>}{aiStatus==='no-match' && <p>No offers met both parties' constraints. Try adjusting your budget or deadline.</p>}{aiStatus==='ready' && <div className="ai-offer-list">{aiOffers.map(o=><div className="ai-offer" key={o.seller}><strong>{o.seller}{aiOffers[0]?.seller===o.seller ? " · BEST PRICE" : ""}</strong><span>{money(o.price)} · {o.days} days · {o.revisions} revisions</span>{sellers.find(s=>s.name===o.seller && s.price>o.price) && <small>Compared with demo asking price: {money(sellers.find(s=>s.name===o.seller)!.price-o.price)} lower</small>}<small>{o.explanation}</small></div>)}</div>}{aiStatus==='idle' && <p>No negotiation has started yet. Create a new deal to generate a real AI transcript.</p>}</div><div className="progress-area"><div className="progress-label"><span>Negotiation progress</span><strong>{realRounds.length ? `Step ${round} of ${realRounds.length}` : 'Not started'}</strong></div><div className="progress-track"><motion.div animate={{width:`${realRounds.length ? round/realRounds.length*100 : 0}%`}} transition={{duration:.35}}/></div></div><div className="chat">{!realRounds.length && <div className="empty">{aiStatus==='loading'?'Negotiation in progress. Messages will appear when it finishes.':aiStatus==='error'?'Unable to load negotiation. Review the error above.':aiStatus==='no-match'?'No compatible offers were found.':'Create a new deal to start an AI negotiation.'}</div>}{realRounds.slice(0,round).map(r=>({from:r.speaker==='BUYER'?'buyer':'seller',name:r.speaker==='BUYER'?'Buyer Agent':r.speaker==='SYSTEM'?'Policy Validator':r.seller,text:r.message})).map((m,i) => <motion.div className={`chat-row ${m.from}`} key={i} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.08}}><span className="chat-avatar">{m.from==='buyer'?'BA':'SN'}</span><div><small>{m.name}</small><p>{m.text}</p></div></motion.div>)}</div><div className="chat-footer"><button className="secondary-btn" disabled={round===1 || realRounds.length===0} onClick={() => setRound(r=>r-1)}>Previous</button><button className="primary-btn" disabled={realRounds.length===0} onClick={() => round<realRounds.length?setRound(r=>r+1):notify('Review complete. Human approval and payment will be implemented in a future release.')}>{round<realRounds.length?'Next message':'Review transcript'} <ArrowRight size={17}/></button></div></section><aside className="panel deal-panel"><div className="overline">CURRENT REQUEST</div><h3>{activeRequest.title}</h3><div className="deal-detail"><Wallet size={18}/> Budget <strong>{money(Number(activeRequest.budget)||0)}</strong></div><div className="deal-detail"><Clock3 size={18}/> Deadline <strong>{activeRequest.days} days</strong></div><div className="deal-detail"><ShieldCheck size={18}/> Revisions <strong>{activeRequest.revisions}</strong></div><div className="divider"/><span className="overline">BEST DEMO OFFER</span><div className="offer-number">{round>=3?'$1,850':'$1,950'}</div><p className="muted">Studio North · {round>=3?'12':'10'} days · 2 revisions</p><div className="savings"><Sparkles size={16}/> {round>=3?'$100 below initial asking price':'Advance rounds to see the counteroffer'}</div><p className="disclaimer">No real agents, contracts, or payments are active in this preview.</p></aside></div></>}
+        {view === 'Negotiations' && <><PageHead kicker="AI NEGOTIATION LAB" title="Where better deals happen" desc="Review multi-round buyer and seller agent proposals and validated terms before any human decision." action={() => setShowCreate(true)}/><div className="negotiation-layout"><section className="panel negotiation-panel"><div className="panel-header"><div className="agent-title"><span className="agent-icon"><Bot size={20}/></span><span><strong>Negotiation workspace</strong><small>Multi-round AI negotiation transcript</small></span></div><span className="status"><span/> DEMO</span></div><div className="ai-results"><div className="ai-results-head"><Sparkles size={16}/> REAL AI SELLER OFFERS</div>{aiStatus==='loading' && <p role="status">Agents are negotiating live. New messages appear as they're validated…</p>}{aiStatus==='error' && <p role="alert">AI request failed: {aiError}. Check the Spring Boot server and OpenAI configuration.</p>}{aiStatus==='no-match' && <p>No offers met both parties' constraints. Try adjusting your budget or deadline.</p>}{aiStatus==='ready' && <div className="ai-offer-list">{aiOffers.map(o=><div className="ai-offer" key={o.seller}><strong>{o.seller}{aiOffers[0]?.seller===o.seller ? " · BEST PRICE" : ""}</strong><span>{money(o.price)} · {o.days} days · {o.revisions} revisions</span>{sellers.find(s=>s.name===o.seller && s.price>o.price) && <small>Compared with demo asking price: {money(sellers.find(s=>s.name===o.seller)!.price-o.price)} lower</small>}<small>{o.explanation}</small></div>)}</div>}{aiStatus==='idle' && <p>No negotiation has started yet. Create a new deal to generate a real AI transcript.</p>}</div><div className="progress-area"><div className="progress-label"><span>Negotiation progress</span><strong>{realRounds.length ? `Step ${round} of ${realRounds.length}` : 'Not started'}</strong></div><div className="progress-track"><motion.div animate={{width:`${realRounds.length ? round/realRounds.length*100 : 0}%`}} transition={{duration:.35}}/></div></div><div className="chat">{!realRounds.length && <div className="empty">{aiStatus==='loading'?'Negotiation started. Waiting for the first agent response…':aiStatus==='error'?'Unable to load negotiation. Review the error above.':aiStatus==='no-match'?'No compatible offers were found.':'Create a new deal to start an AI negotiation.'}</div>}{realRounds.slice(0,round).map(r=>({from:r.speaker==='BUYER'?'buyer':'seller',name:r.speaker==='BUYER'?'Buyer Agent':r.speaker==='SYSTEM'?'Policy Validator':r.seller,text:r.message,seller:r.seller,speaker:r.speaker,price:r.price,days:r.days,revisions:r.revisions})).map((m,i) => <motion.div className={`chat-row ${m.from}`} key={i} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:.08}}><span className="chat-avatar">{m.speaker==='SYSTEM'?'PV':m.from==='buyer'?'BA':m.seller.split(' ').map(w=>w[0]).join('').slice(0,2)}</span><div><small>{m.name}</small><p>{m.text}</p>{m.speaker!=='SYSTEM' && m.price!=null && <div className="chat-terms"><strong>{money(m.price)}</strong><span>{m.days} days</span><span>{m.revisions} revisions</span></div>}</div></motion.div>)}</div><div className="chat-footer"><button className="secondary-btn" disabled={round===1 || realRounds.length===0} onClick={() => setRound(r=>r-1)}>Previous</button><button className="primary-btn" disabled={realRounds.length===0} onClick={() => round<realRounds.length?setRound(r=>r+1):notify('Review complete. Human approval and payment will be implemented in a future release.')}>{round<realRounds.length?'Next message':'Review transcript'} <ArrowRight size={17}/></button></div></section><aside className="panel deal-panel"><div className="overline">CURRENT REQUEST</div><h3>{activeRequest.title}</h3><div className="deal-detail"><Wallet size={18}/> Budget <strong>{money(Number(activeRequest.budget)||0)}</strong></div><div className="deal-detail"><Clock3 size={18}/> Deadline <strong>{activeRequest.days} days</strong></div><div className="deal-detail"><ShieldCheck size={18}/> Revisions <strong>{activeRequest.revisions}</strong></div><div className="divider"/><span className="overline">BEST DEMO OFFER</span><div className="offer-number">{round>=3?'$1,850':'$1,950'}</div><p className="muted">Studio North · {round>=3?'12':'10'} days · 2 revisions</p><div className="savings"><Sparkles size={16}/> {round>=3?'$100 below initial asking price':'Advance rounds to see the counteroffer'}</div><p className="disclaimer">No real agents, contracts, or payments are active in this preview.</p></aside></div></>}
         {view === 'Agreements' && <><PageHead kicker="TRUSTED DEALS" title="Agreements" desc="A secure place for approved terms and future PayPal checkout."/><div className="empty-state"><div className="empty-icon"><FileCheck2 size={30}/></div><h3>No agreements yet</h3><p>Once a real negotiation is completed and both parties approve the terms, agreements will appear here. This feature is planned for a future release.</p><button className="primary-btn" onClick={() => changeView('Negotiations')}>Explore negotiation demo <ArrowRight size={17}/></button></div></>}
       </motion.div></AnimatePresence>
     </main>
