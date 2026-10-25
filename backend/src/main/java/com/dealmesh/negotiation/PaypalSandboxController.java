@@ -76,7 +76,7 @@ public class PaypalSandboxController {
  @GetMapping("/{id}") public Payment status(@PathVariable UUID id) {
    var a=agreements.get(id);
    Payment p=stored(id,a.version());
-   if(p==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"No Sandbox order for this agreement version");
+   if(p==null)return new Payment(id.toString(),a.version(),null,null,"NOT_STARTED",null,null);
    return p;
  }
  @PostMapping("/{id}/orders")
