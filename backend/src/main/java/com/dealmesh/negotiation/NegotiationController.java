@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/negotiations")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:5174"})
 public class NegotiationController {
  private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
  private final NegotiationService service;
