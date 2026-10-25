@@ -61,3 +61,18 @@ export async function getReview(token:string):Promise<Review> {
  return response.json() as Promise<Review>;
 }
 export const approveReview = (token:string) => post<Agreement>('/api/agreements/review/'+encodeURIComponent(token)+'/approve');
+
+export type SandboxPayment = {agreementId:string;version:number;orderId:string;amount:string;status:string;captureId:string|null;approvalUrl:string|null};
+export const createSandboxOrder = (id:string) => post<SandboxPayment>('/api/payments/'+encodeURIComponent(id)+'/orders');
+export const captureSandboxOrder = (id:string) => post<SandboxPayment>('/api/payments/'+encodeURIComponent(id)+'/capture');
+export async function getSandboxPayment(id:string):Promise<SandboxPayment|null> {
+ const response=await fetch(API+'/api/payments/'+encodeURIComponent(id));
+ if(response.status===404)return null;
+ if(!response.ok)throw new Error('Unable to retrieve Sandbox payment');
+ return response.json() as Promise<SandboxPayment>;
+}
+export async function getSandboxApproval(id:string):Promise<SandboxPayment> {
+ const response=await fetch(API+'/api/payments/'+encodeURIComponent(id)+'/approval');
+ if(!response.ok)throw new Error('Unable to retrieve PayPal approval URL');
+ return response.json() as Promise<SandboxPayment>;
+}
