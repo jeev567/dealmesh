@@ -116,6 +116,8 @@ public class AgreementRepository {
  public synchronized Agreement revise(UUID id,int expectedVersion,String project,int price,int days,int revisions,String hash) {
    Agreement old=get(id);
    if(old.version()!=expectedVersion) throw new ResponseStatusException(HttpStatus.CONFLICT,"Agreement version changed; refresh before editing");
+   Integer paymentCount=jdbc.queryForObject("SELECT count(*) FROM paypal_sandbox_payments WHERE agreement_id=?",Integer.class,id.toString());
+   if(paymentCount!=null && paymentCount>0) throw new ResponseStatusException(HttpStatus.CONFLICT,"Agreement cannot be revised after a Sandbox order is created");
    int next=old.version()+1;
    jdbc.update("""
      UPDATE agreements SET version=?,project=?,price=?,days=?,revisions=?,terms_hash=?,
