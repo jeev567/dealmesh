@@ -18,3 +18,4 @@ paypal:
   sandbox:
     client-id: ${PAYPAL_SANDBOX_CLIENT_ID:}
     client-secret: ${PAYPAL_SANDBOX_CLIENT_SECRET:}
+    frontend-url: ${DEALMESH_FRONTEND_URL:http://localhost:5173}
