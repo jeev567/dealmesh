@@ -30,6 +30,8 @@ export default function App() {
   const [agreementBusy,setAgreementBusy] = useState(false);
   const [payment,setPayment] = useState<SandboxPayment|null>(null);
   const [paymentBusy,setPaymentBusy] = useState(false);
+  const checkoutHandled=useRef(false);
+  const [checkoutMessage,setCheckoutMessage]=useState('');
   const [paymentError,setPaymentError] = useState('');
   const loadPayment=(id:string)=>getSandboxPayment(id).then(setPayment).catch(e=>setPaymentError(e instanceof Error?e.message:'Payment status unavailable'));
   const startPayment=async()=>{
@@ -39,7 +41,7 @@ export default function App() {
       const p=await createSandboxOrder(agreement.id);
       setPayment(p);
       const ready=p.approvalUrl?p:await getSandboxApproval(agreement.id);
-      if(ready.approvalUrl)window.open(ready.approvalUrl,'_blank','noopener,noreferrer');
+      if(ready.approvalUrl)window.location.assign(ready.approvalUrl);
       else notify('Sandbox order created. Use Continue on PayPal to approve.');
     }catch(e){setPaymentError(e instanceof Error?e.message:'Unable to create Sandbox order');}
     finally{setPaymentBusy(false);}
@@ -50,7 +52,7 @@ export default function App() {
     try{
       const p=await getSandboxApproval(agreement.id);
       setPayment(p);
-      if(p.approvalUrl)window.open(p.approvalUrl,'_blank','noopener,noreferrer');
+      if(p.approvalUrl)window.location.assign(p.approvalUrl);
       else notify('No approval link available. Check the order in PayPal Sandbox.');
     }catch(e){setPaymentError(e instanceof Error?e.message:'Unable to open Sandbox approval');}
     finally{setPaymentBusy(false);}
@@ -74,7 +76,32 @@ export default function App() {
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
     const token=params.get('review');
-    const saved=params.get('agreement') || window.localStorage.getItem('dealmesh-last-agreement');
+    const checkout=params.get('checkout');
+    const checkoutAgreement=params.get('agreement');
+    const saved=checkoutAgreement || window.localStorage.getItem('dealmesh-last-agreement');
+    if(checkout && checkoutAgreement && !checkoutHandled.current) {
+      checkoutHandled.current=true;
+      setView('Agreements');
+      setCheckoutMessage(checkout==='cancelled'?'PayPal checkout was cancelled. No capture was requested.':'Verifying PayPal approval and completing Sandbox capture…');
+      window.history.replaceState({},'',window.location.pathname);
+      getAgreement(checkoutAgreement).then(a=>{
+        setAgreement(a);window.localStorage.setItem('dealmesh-last-agreement',a.id);
+        refreshAudit(a.id);
+        if(checkout==='approved') {
+          setPaymentBusy(true);
+          return getSandboxPayment(a.id).then(p=>{
+            if(!p||!p.orderId)throw new Error('No Sandbox order found for this agreement');
+            return captureSandboxOrder(a.id).then(done=>{
+              setPayment(done);
+              setCheckoutMessage(done.status==='COMPLETED'?'Sandbox payment completed successfully. Capture: '+done.captureId:'PayPal status: '+done.status);
+              refreshAudit(a.id);
+            });
+          }).finally(()=>setPaymentBusy(false));
+        }
+        return loadPayment(a.id);
+      }).catch(e=>{setPaymentError(e instanceof Error?e.message:'Checkout verification failed');setCheckoutMessage('Could not confirm checkout. Please check the payment status before retrying.');});
+      return;
+    }
     if(token) {
       getReview(token).then(r=>{setReview(r);setView('Agreements');}).catch(e=>{setReviewError(e.message);setView('Agreements');});
     } else if(saved) {
@@ -199,6 +226,7 @@ export default function App() {
         <div className="agreement-actions"><div><strong>Agreement version</strong><small>Changing terms resets both approvals and invalidates previous links.</small><button className="secondary-btn" onClick={()=>{setDraftTerms({project:agreement.project,price:agreement.price,days:agreement.days,revisions:agreement.revisions});setEditTerms(true);}}>Revise terms</button></div></div>
         {editTerms && <div className="modal" style={{position:'relative',width:'100%',maxWidth:'100%',marginTop:16}}><h3>New agreement version</h3><form onSubmit={e=>{e.preventDefault();saveRevision();}}><label>Project<input required maxLength={200} value={draftTerms.project} onChange={e=>setDraftTerms({...draftTerms,project:e.target.value})}/></label><div className="form-grid"><label>Price USD<input required type="number" min="1" value={draftTerms.price} onChange={e=>setDraftTerms({...draftTerms,price:Number(e.target.value)})}/></label><label>Delivery days<input required type="number" min="1" value={draftTerms.days} onChange={e=>setDraftTerms({...draftTerms,days:Number(e.target.value)})}/></label></div><label>Revisions<input required type="number" min="0" max="20" value={draftTerms.revisions} onChange={e=>setDraftTerms({...draftTerms,revisions:Number(e.target.value)})}/></label><button className="primary-btn" type="submit" disabled={agreementBusy}>Save new version</button><button type="button" className="secondary-btn" onClick={()=>setEditTerms(false)}>Cancel</button></form></div>}
         <div className="agreement-actions"><div style={{width:'100%'}}><strong>PayPal Sandbox checkout</strong><small>Only after both demo approvals. A separate buyer action is required. Sandbox only — no real funds.</small>
+        {checkoutMessage && <p role="status" className="muted">{checkoutMessage}</p>}
         {paymentError && <p role="alert" className="disclaimer">{paymentError}</p>}
         {payment && <p className="muted">Order {payment.orderId} · USD {payment.amount} · {payment.status}{payment.captureId?' · Capture '+payment.captureId:''}</p>}
         {agreement.status==='DEMO_APPROVED' && !payment && <button className="primary-btn" disabled={paymentBusy} onClick={startPayment}>Create PayPal Sandbox order</button>}
