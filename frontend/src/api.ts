@@ -69,7 +69,8 @@ export async function getSandboxPayment(id:string):Promise<SandboxPayment|null> 
  const response=await fetch(API+'/api/payments/'+encodeURIComponent(id));
  if(response.status===404)return null;
  if(!response.ok)throw new Error('Unable to retrieve Sandbox payment');
- return response.json() as Promise<SandboxPayment>;
+ const payment=await response.json() as SandboxPayment;
+ return payment.status==='NOT_STARTED'?null:payment;
 }
 export async function getSandboxApproval(id:string):Promise<SandboxPayment> {
  const response=await fetch(API+'/api/payments/'+encodeURIComponent(id)+'/approval');
