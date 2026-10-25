@@ -15,6 +15,8 @@ public class NegotiationController {
  private final NegotiationService service;
  private final OpenAiNegotiationService ai;
  private final Map<UUID,List<Round>> transcripts = new ConcurrentHashMap<>();
+ private final java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(3);
+ private final Map<UUID,String> failures = new ConcurrentHashMap<>();
  public NegotiationController(NegotiationService service, OpenAiNegotiationService ai) {
    this.service=service; this.ai=ai;
  }
@@ -63,6 +65,36 @@ public class NegotiationController {
    transcripts.put(id,List.copyOf(transcript));
    sessions.put(id,updated);
    return updated;
+ }
+ @PostMapping("/{id}/start")
+ public synchronized ResponseEntity<Session> start(@PathVariable UUID id) {
+   Session existing=get(id);
+   if(!existing.status().equals("CREATED")) {
+     throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT,"Negotiation already started");
+   }
+   Session running=new Session(id,existing.title(),existing.budget(),existing.days(),existing.revisions(),"RUNNING",List.of());
+   sessions.put(id,running);
+   transcripts.put(id,new java.util.concurrent.CopyOnWriteArrayList<>());
+   executor.submit(() -> {
+     try {
+       var result=ai.negotiate(new CreateRequest(existing.title(),existing.budget(),existing.days(),existing.revisions()), turn -> {
+         List<Round> log=transcripts.get(id);
+         log.add(new Round(log.size()+1,turn.seller(),turn.speaker(),turn.message(),
+           turn.price(),turn.days(),turn.revisions()));
+       });
+       sessions.put(id,new Session(id,existing.title(),existing.budget(),existing.days(),existing.revisions(),
+         result.offers().isEmpty()?"NO_MATCH":"OFFERS_READY",result.offers()));
+     } catch(Exception e) {
+       failures.put(id,"Negotiation failed. Check backend logs and OpenAI configuration.");
+       sessions.put(id,new Session(id,existing.title(),existing.budget(),existing.days(),existing.revisions(),"FAILED",List.of()));
+     }
+   });
+   return ResponseEntity.accepted().body(running);
+ }
+ @GetMapping("/{id}/error")
+ public Map<String,String> error(@PathVariable UUID id) {
+   get(id);
+   return Map.of("message",failures.getOrDefault(id,""));
  }
  @GetMapping("/{id}/rounds")
  public List<Round> rounds(@PathVariable UUID id) {
