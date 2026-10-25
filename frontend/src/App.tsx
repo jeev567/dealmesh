@@ -106,7 +106,7 @@ export default function App() {
     if(token) {
       getReview(token).then(r=>{setReview(r);setView('Agreements');}).catch(e=>{setReviewError(e.message);setView('Agreements');});
     } else if(saved) {
-      getAgreement(saved).then(a=>{setAgreement(a);setView('Agreements');loadPayment(a.id);getAudit(a.id).then(setAudit).catch(()=>{});}).catch(()=>{window.localStorage.removeItem('dealmesh-last-agreement');});
+      getAgreement(saved).then(a=>{setAgreement(a);loadPayment(a.id);getAudit(a.id).then(setAudit).catch(()=>{});}).catch(()=>{window.localStorage.removeItem('dealmesh-last-agreement');});
     }
   },[]);
   const refreshAudit=(id:string)=>getAudit(id).then(setAudit).catch(()=>{});
