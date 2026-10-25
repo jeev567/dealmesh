@@ -244,7 +244,7 @@ export default function App() {
           <div style={{fontSize:32,fontWeight:750,marginBottom:16}}>USD {Number(payment.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</div>
           <div className="muted" style={{overflowWrap:'anywhere',lineHeight:2}}>PayPal order: {payment.orderId}<br/>Capture ID: {payment.captureId}<br/>Agreement version: V{payment.version}</div>
           <small style={{display:'block',marginTop:12,color:'#a4b0c7'}}>Sandbox transaction · No real funds transferred</small>
-        </div> : payment && <p className="muted">Order {payment.orderId} · USD {payment.amount} · {payment.status}</p>
+        </div> : payment && <p className="muted">Order {payment.orderId} · USD {payment.amount} · {payment.status}</p>}
         {agreement.status==='DEMO_APPROVED' && !payment && <button className="primary-btn" disabled={paymentBusy} onClick={startPayment}>Create PayPal Sandbox order</button>}
         {agreement.status==='DEMO_APPROVED' && payment && payment.status!=='COMPLETED' && <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:12}}><button className="secondary-btn" disabled={paymentBusy} onClick={continuePayment}>Continue on PayPal Sandbox</button><button className="primary-btn" disabled={paymentBusy} onClick={capturePayment}>I've approved on PayPal — capture payment</button></div>}
 
