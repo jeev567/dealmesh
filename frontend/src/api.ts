@@ -40,5 +40,24 @@ export async function getNegotiationError(id: string): Promise<string> {
 }
 
 export type Agreement = { id:string; negotiationId:string; version:number; project:string; seller:string; price:number; days:number; revisions:number; termsHash:string; buyerApproved:boolean; sellerDemoApproved:boolean; status:string };
-export const createAgreement = (negotiationId:string,seller:string) => post<Agreement>('/api/agreements',{negotiationId,seller});
-export const approveAgreement = (id:string,role:'buyer'|'seller-demo') => post<Agreement>('/api/agreements/'+encodeURIComponent(id)+'/approve/'+role);
+export type ApprovalLinks = { agreement:Agreement; buyerToken:string; sellerDemoToken:string };
+export type AuditEvent = { id:number; event:string; createdAt:string };
+export const createAgreement = (negotiationId:string,seller:string) => post<ApprovalLinks>('/api/agreements',{negotiationId,seller});
+export const reviseAgreement = (id:string,request:{expectedVersion:number;project:string;price:number;days:number;revisions:number}) => post<ApprovalLinks>('/api/agreements/'+encodeURIComponent(id)+'/revise',request);
+export async function getAgreement(id:string):Promise<Agreement> {
+ const response=await fetch(API+'/api/agreements/'+encodeURIComponent(id));
+ if(!response.ok) throw new Error('Unable to load agreement');
+ return response.json() as Promise<Agreement>;
+}
+export async function getAudit(id:string):Promise<AuditEvent[]> {
+ const response=await fetch(API+'/api/agreements/'+encodeURIComponent(id)+'/audit');
+ if(!response.ok) throw new Error('Unable to load audit history');
+ return response.json() as Promise<AuditEvent[]>;
+}
+export type Review = {agreement:Agreement;role:'buyer'|'seller-demo';approved:boolean};
+export async function getReview(token:string):Promise<Review> {
+ const response=await fetch(API+'/api/agreements/review/'+encodeURIComponent(token));
+ if(!response.ok) throw new Error('Review link is invalid or expired (HTTP '+response.status+')');
+ return response.json() as Promise<Review>;
+}
+export const approveReview = (token:string) => post<Agreement>('/api/agreements/review/'+encodeURIComponent(token)+'/approve');
