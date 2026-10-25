@@ -34,9 +34,22 @@ public class OpenAiNegotiationService {
  public record NegotiationResult(List<Offer> offers, List<NegotiationTurn> turns) {}
 
  public NegotiationResult negotiate(CreateRequest buyer) {
+   return negotiate(buyer, turn -> {});
+ }
+
+ public NegotiationResult negotiate(CreateRequest buyer, java.util.function.Consumer<NegotiationTurn> onTurn) {
    if(apiKey.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"OPENAI_API_KEY is not configured");
    List<Offer> winners=new ArrayList<>();
-   List<NegotiationTurn> turns=new ArrayList<>();
+   List<NegotiationTurn> turns=new ArrayList<>() {
+     @Override public boolean add(NegotiationTurn turn) {
+       boolean added=super.add(turn);
+       if(added) onTurn.accept(turn);
+       return added;
+     }
+   };
+   // Publish each validated transcript event as soon as it is created.
+   // An ArrayList subclass keeps the existing negotiation logic and callback in sync.
+
    for(SellerPolicy seller:policy.sellers()) {
      Offer current=propose(buyer,seller);
      Offer best=null;
