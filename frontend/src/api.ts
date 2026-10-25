@@ -38,3 +38,7 @@ export async function getNegotiationError(id: string): Promise<string> {
  const result=await response.json() as {message:string};
  return result.message || 'Negotiation failed';
 }
+
+export type Agreement = { id:string; negotiationId:string; version:number; project:string; seller:string; price:number; days:number; revisions:number; termsHash:string; buyerApproved:boolean; sellerDemoApproved:boolean; status:string };
+export const createAgreement = (negotiationId:string,seller:string) => post<Agreement>('/api/agreements',{negotiationId,seller});
+export const approveAgreement = (id:string,role:'buyer'|'seller-demo') => post<Agreement>('/api/agreements/'+encodeURIComponent(id)+'/approve/'+role);
