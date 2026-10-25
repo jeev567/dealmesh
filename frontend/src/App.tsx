@@ -251,7 +251,7 @@ export default function App() {
               <animateMotion dur="1.25s" repeatCount="indefinite" path={path}/>
             </circle>}
           </g>;
-        }>
+        })}
         {[37,111,185].map((y,i)=><circle key={i} cx="177" cy={y} r="4" fill={aiStatus==='ready'?'#6be3b2':aiStatus==='no-match'?'#efb26c':'#9a8ae7'}/>)}
       </svg>
     </div>
