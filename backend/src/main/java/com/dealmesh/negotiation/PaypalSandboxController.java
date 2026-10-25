@@ -21,6 +21,7 @@ public class PaypalSandboxController {
  private final RestClient client=RestClient.create();
  @Value("${paypal.sandbox.client-id:}") private String clientId;
  @Value("${paypal.sandbox.client-secret:}") private String clientSecret;
+ @Value("${paypal.sandbox.frontend-url:http://localhost:5173}") private String frontendUrl;
  private static final String BASE="https://api-m.sandbox.paypal.com";
 
  public PaypalSandboxController(AgreementRepository agreements,JdbcTemplate jdbc) {
@@ -87,8 +88,14 @@ public class PaypalSandboxController {
    String amount=BigDecimal.valueOf(a.price()).setScale(2).toPlainString();
    String access=bearer();
    String requestId="dealmesh-"+id+"-v"+a.version();
-   Map<String,Object> body=Map.of("intent","CAPTURE","purchase_units",List.of(
-     Map.of("reference_id",id.toString()+"-v"+a.version(),
+   String returnUrl=frontendUrl+"/?checkout=approved&agreement="+id;
+   String cancelUrl=frontendUrl+"/?checkout=cancelled&agreement="+id;
+   Map<String,Object> body=Map.of(
+     "intent","CAPTURE",
+     "payment_source",Map.of("paypal",Map.of("experience_context",Map.of(
+       "return_url",returnUrl,"cancel_url",cancelUrl,"user_action","PAY_NOW",
+       "shipping_preference","NO_SHIPPING"))),
+     "purchase_units",List.of(Map.of("reference_id",id.toString()+"-v"+a.version(),
        "description","DealMesh demo agreement v"+a.version(),
        "amount",Map.of("currency_code","USD","value",amount))));
    JsonNode result=paypal("POST","/v2/checkout/orders",access,body,requestId);
@@ -130,6 +137,12 @@ public class PaypalSandboxController {
    if("COMPLETED".equals(p.status()))return p;
    String access=bearer();
    JsonNode order=paypal("GET","/v2/checkout/orders/"+p.orderId(),access,null,null);
+   if("COMPLETED".equals(order.path("status").asText())) {
+     String existingCapture=order.path("purchase_units").path(0).path("payments").path("captures").path(0).path("id").asText("");
+     if(existingCapture.isBlank())throw new ResponseStatusException(HttpStatus.CONFLICT,"Order completed but capture details unavailable");
+     jdbc.update("UPDATE paypal_sandbox_payments SET status='COMPLETED',capture_id=?,updated_at=CURRENT_TIMESTAMP WHERE order_id=?",existingCapture,p.orderId());
+     return stored(id,a.version());
+   }
    if(!"APPROVED".equals(order.path("status").asText()))
      throw new ResponseStatusException(HttpStatus.CONFLICT,"Buyer must approve the order on PayPal Sandbox first");
    JsonNode result=paypal("POST","/v2/checkout/orders/"+p.orderId()+"/capture",access,Map.of(),
