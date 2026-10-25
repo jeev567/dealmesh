@@ -13,3 +13,8 @@ management:
     web:
       exposure:
         include: health,info
+
+paypal:
+  sandbox:
+    client-id: ${PAYPAL_SANDBOX_CLIENT_ID:}
+    client-secret: ${PAYPAL_SANDBOX_CLIENT_SECRET:}
