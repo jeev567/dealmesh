@@ -131,6 +131,14 @@ export default function App() {
     finally{setAgreementBusy(false);}
   };
   const [realRounds, setRealRounds] = useState<NegotiationRound[]>([]);
+  const [talkingSeller,setTalkingSeller] = useState<string|null>(null);
+  const talkTimer=useRef<number|null>(null);
+  useEffect(()=>()=>{if(talkTimer.current!==null)window.clearTimeout(talkTimer.current);},[]);
+  const highlightConversation=(seller:string)=>{
+    if(talkTimer.current!==null)window.clearTimeout(talkTimer.current);
+    setTalkingSeller(seller);
+    talkTimer.current=window.setTimeout(()=>{setTalkingSeller(null);talkTimer.current=null;},1800);
+  };
   const [aiStatus, setAiStatus] = useState<'idle'|'loading'|'ready'|'no-match'|'error'>('idle');
   const [aiError, setAiError] = useState('');
   const resultRef = useRef<HTMLDivElement|null>(null);
@@ -146,12 +154,13 @@ export default function App() {
   const start = async () => {
     if (pollRef.current !== null) window.clearInterval(pollRef.current);
     setActiveRequest(request); setRound(1); setShowCreate(false); setView('Negotiations');
-    setAiStatus('loading'); setAiOffers([]); setRealRounds([]); setAiError('');
+    setAiStatus('loading'); setAiOffers([]); setRealRounds([]); setAiError(''); setTalkingSeller(null);
     try {
       const created = await createNegotiation({title:request.title,budget:Number(request.budget),days:Number(request.days),revisions:Number(request.revisions)});
       setNegotiationId(created.id);
       await startNegotiation(created.id);
       let inFlight = false;
+      let seenMessages = 0;
       const started = Date.now();
       const poll = async () => {
         if (inFlight) return;
@@ -160,11 +169,18 @@ export default function App() {
           const [result, transcript] = await Promise.all([getNegotiation(created.id),getRounds(created.id)]);
           setRealRounds(transcript);
           setRound(transcript.length || 1);
+          if(result.status==='RUNNING' && transcript.length>seenMessages) {
+            const latest=transcript[transcript.length-1];
+            if(latest?.seller)highlightConversation(latest.seller);
+          }
+          seenMessages=transcript.length;
           if (result.status !== 'RUNNING') {
             if (pollRef.current !== null) window.clearInterval(pollRef.current);
             pollRef.current = null;
             if (result.status === 'FAILED') throw new Error(await getNegotiationError(created.id));
             setAiOffers(result.offers);
+            setTalkingSeller(null);
+            if(talkTimer.current!==null)window.clearTimeout(talkTimer.current);
             setAiStatus(result.offers.length ? 'ready' : 'no-match');
           } else if (Date.now() - started > 180000) {
             throw new Error('Negotiation is taking longer than expected. Check the backend logs.');
@@ -226,14 +242,21 @@ export default function App() {
     <motion.div animate={{boxShadow:realRounds.slice(0,round).at(-1)?.speaker==='BUYER'?'0 0 22px rgba(116,101,255,.35)':'0 0 0px transparent'}} style={{minWidth:130,padding:'18px 12px',borderRadius:16,background:'rgba(103,87,220,.2)',border:'1px solid rgba(151,136,255,.5)',textAlign:'center'}}><Bot size={26} color="#afa1ff"/><div style={{fontWeight:700,marginTop:8}}>Buyer agent</div><small className="muted">Budget {money(Number(activeRequest.budget)||0)}</small></motion.div>
     <div style={{minWidth:115,flex:1,alignSelf:'stretch',display:'flex',alignItems:'center'}}>
       <svg viewBox="0 0 180 222" width="100%" height="222" role="img" aria-label="One buyer agent branches into three seller conversations">
-        <path d="M0 111 H66 M66 37 V185 M66 37 H180 M66 111 H180 M66 185 H180" stroke="rgba(143,130,230,.7)" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-        {aiStatus==='loading' && [37,111,185].map((y,i)=><motion.circle key={i} r="5" fill="#6be3d4" initial={{cx:66,cy:111}} animate={{cx:[66,66,175,66],cy:[111,y,y,111]}} transition={{duration:2.6,repeat:Infinity,delay:i*.55,ease:'easeInOut'}}/>)}
-        <circle cx="66" cy="111" r="6" fill="#998bfa"/>
+        {[37,111,185].map((y,i)=>{
+          const path=`M0 111 C70 111, 92 ${y}, 180 ${y}`;
+          const flowing=aiStatus==='loading' && talkingSeller===sellers[i].name;
+          return <g key={sellers[i].id}>
+            <path d={path} stroke={flowing?'#65e1d2':'rgba(143,130,230,.45)'} strokeWidth={flowing?3:2} fill="none" strokeLinecap="round"/>
+            {flowing && <circle r="5" fill="#6be3d4">
+              <animateMotion dur="1.25s" repeatCount="indefinite" path={path}/>
+            </circle>}
+          </g>;
+        }>
         {[37,111,185].map((y,i)=><circle key={i} cx="177" cy={y} r="4" fill={aiStatus==='ready'?'#6be3b2':aiStatus==='no-match'?'#efb26c':'#9a8ae7'}/>)}
       </svg>
     </div>
     <div style={{display:'flex',flexDirection:'column',gap:8,minWidth:170,flex:1}}>
-      {sellers.map(seller=>{const messages=realRounds.slice(0,round).filter(r=>r.seller===seller.name);const active=realRounds.slice(0,round).at(-1)?.seller===seller.name;const validated=aiOffers.some(o=>o.seller===seller.name);return <motion.div key={seller.id} animate={{borderColor:active?'rgba(104,222,211,.95)':'rgba(150,145,199,.25)',boxShadow:active?'0 0 16px rgba(82,212,210,.2)':'none'}} style={{minHeight:68,padding:'9px 12px',borderRadius:12,border:'1px solid',background:'rgba(31,36,64,.9)',display:'flex',justifyContent:'space-between',gap:8,alignItems:'center'}}><div><strong style={{fontSize:12}}>{seller.name}</strong><div className="muted" style={{fontSize:11}}>{messages.length} messages</div></div><span style={{fontSize:11,color:active?'#6ce0d7':'#a5a9c4'}}>{aiStatus==='loading'&&active?'● ACTIVE':validated?'✓ VALIDATED':aiStatus==='no-match'?'NO MATCH':messages.length?'REPLIED':'WAITING'}</span></motion.div>;})}
+      {sellers.map(seller=>{const messages=realRounds.slice(0,round).filter(r=>r.seller===seller.name);const active=aiStatus==='loading'&&talkingSeller===seller.name;const validated=aiOffers.some(o=>o.seller===seller.name);return <motion.div key={seller.id} animate={{borderColor:active?'rgba(104,222,211,.95)':'rgba(150,145,199,.25)',boxShadow:active?'0 0 16px rgba(82,212,210,.2)':'none'}} style={{minHeight:68,padding:'9px 12px',borderRadius:12,border:'1px solid',background:'rgba(31,36,64,.9)',display:'flex',justifyContent:'space-between',gap:8,alignItems:'center'}}><div><strong style={{fontSize:12}}>{seller.name}</strong><div className="muted" style={{fontSize:11}}>{messages.length} messages</div></div><span style={{fontSize:11,color:active?'#6ce0d7':'#a5a9c4'}}>{aiStatus==='loading'&&active?'● ACTIVE':validated?'✓ VALIDATED':aiStatus==='no-match'?'NO MATCH':messages.length?'REPLIED':'WAITING'}</span></motion.div>;})}
     </div>
   </div>
   <div className="muted" style={{fontSize:12}}>Showing {Math.min(round,realRounds.length)} of {realRounds.length} recorded messages · Use Next message to replay the conversation</div>
