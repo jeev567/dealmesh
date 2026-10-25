@@ -25,3 +25,16 @@ export async function getRounds(id: string): Promise<NegotiationRound[]> {
 }
 
 export const negotiate = (id: string) => post<Negotiation>('/api/negotiations/'+encodeURIComponent(id)+'/negotiate');
+
+export const startNegotiation = (id: string) => post<Negotiation>('/api/negotiations/'+encodeURIComponent(id)+'/start');
+export async function getNegotiation(id: string): Promise<Negotiation> {
+ const response=await fetch(API+'/api/negotiations/'+encodeURIComponent(id));
+ if(!response.ok) throw new Error('Unable to retrieve negotiation');
+ return response.json() as Promise<Negotiation>;
+}
+export async function getNegotiationError(id: string): Promise<string> {
+ const response=await fetch(API+'/api/negotiations/'+encodeURIComponent(id)+'/error');
+ if(!response.ok) return 'Negotiation failed';
+ const result=await response.json() as {message:string};
+ return result.message || 'Negotiation failed';
+}
