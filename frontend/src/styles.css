@@ -7,3 +7,7 @@
 .ai-offer{display:grid;gap:5px;padding:12px;background:#11172b;border:1px solid #373b5a;border-radius:9px}
 .ai-offer strong{font-size:12px}.ai-offer span{color:#a6edcc;font-size:12px;font-weight:700}.ai-offer small{color:#a2a8c0;font-size:11px;line-height:1.6}
 @media(max-width:600px){.ai-results{margin:16px 15px 0}}
+
+.chat-terms{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chat-terms span,.chat-terms strong{display:inline-flex;align-items:center;padding:5px 9px;border-radius:7px;background:rgba(122,105,241,.14);border:1px solid rgba(147,130,245,.22);color:#c8baff;font-size:11px}
+.chat-terms strong{color:#a9f0d1;font-size:12px}
