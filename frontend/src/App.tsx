@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createNegotiation, startNegotiation, getNegotiation, getNegotiationError, getRounds, type NegotiationRound, type AiOffer, createAgreement, reviseAgreement, getAgreement, getAudit, getReview, approveReview, type Review, type AuditEvent, type ApprovalLinks, type Agreement } from './api';
+import { createNegotiation, startNegotiation, getNegotiation, getNegotiationError, getRounds, type NegotiationRound, type AiOffer, createAgreement, reviseAgreement, getAgreement, getAudit, getReview, approveReview, type Review, type AuditEvent, type ApprovalLinks, type Agreement, createSandboxOrder, captureSandboxOrder, getSandboxPayment, getSandboxApproval, type SandboxPayment } from './api';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleDollarSign, Clock3, Command, Compass, CreditCard, FileCheck2, LayoutDashboard, Menu, MessageSquareText, Plus, Search, ShieldCheck, Sparkles, TrendingDown, Users, Wallet, X, Zap } from 'lucide-react';
 
@@ -28,6 +28,43 @@ export default function App() {
   const [negotiationId,setNegotiationId] = useState('');
   const [agreement,setAgreement] = useState<Agreement|null>(null);
   const [agreementBusy,setAgreementBusy] = useState(false);
+  const [payment,setPayment] = useState<SandboxPayment|null>(null);
+  const [paymentBusy,setPaymentBusy] = useState(false);
+  const [paymentError,setPaymentError] = useState('');
+  const loadPayment=(id:string)=>getSandboxPayment(id).then(setPayment).catch(e=>setPaymentError(e instanceof Error?e.message:'Payment status unavailable'));
+  const startPayment=async()=>{
+    if(!agreement||paymentBusy)return;
+    setPaymentBusy(true);setPaymentError('');
+    try{
+      const p=await createSandboxOrder(agreement.id);
+      setPayment(p);
+      const ready=p.approvalUrl?p:await getSandboxApproval(agreement.id);
+      if(ready.approvalUrl)window.open(ready.approvalUrl,'_blank','noopener,noreferrer');
+      else notify('Sandbox order created. Use Continue on PayPal to approve.');
+    }catch(e){setPaymentError(e instanceof Error?e.message:'Unable to create Sandbox order');}
+    finally{setPaymentBusy(false);}
+  };
+  const continuePayment=async()=>{
+    if(!agreement||paymentBusy)return;
+    setPaymentBusy(true);setPaymentError('');
+    try{
+      const p=await getSandboxApproval(agreement.id);
+      setPayment(p);
+      if(p.approvalUrl)window.open(p.approvalUrl,'_blank','noopener,noreferrer');
+      else notify('No approval link available. Check the order in PayPal Sandbox.');
+    }catch(e){setPaymentError(e instanceof Error?e.message:'Unable to open Sandbox approval');}
+    finally{setPaymentBusy(false);}
+  };
+  const capturePayment=async()=>{
+    if(!agreement||paymentBusy)return;
+    setPaymentBusy(true);setPaymentError('');
+    try{
+      const p=await captureSandboxOrder(agreement.id);
+      setPayment(p);refreshAudit(agreement.id);
+      notify('PayPal Sandbox capture confirmed.');
+    }catch(e){setPaymentError(e instanceof Error?e.message:'Capture failed');}
+    finally{setPaymentBusy(false);}
+  };
   const [links,setLinks] = useState<ApprovalLinks|null>(null);
   const [audit,setAudit] = useState<AuditEvent[]>([]);
   const [review,setReview] = useState<Review|null>(null);
@@ -41,7 +78,7 @@ export default function App() {
     if(token) {
       getReview(token).then(r=>{setReview(r);setView('Agreements');}).catch(e=>{setReviewError(e.message);setView('Agreements');});
     } else if(saved) {
-      getAgreement(saved).then(a=>{setAgreement(a);setView('Agreements');getAudit(a.id).then(setAudit).catch(()=>{});}).catch(()=>{window.localStorage.removeItem('dealmesh-last-agreement');});
+      getAgreement(saved).then(a=>{setAgreement(a);setView('Agreements');loadPayment(a.id);getAudit(a.id).then(setAudit).catch(()=>{});}).catch(()=>{window.localStorage.removeItem('dealmesh-last-agreement');});
     }
   },[]);
   const refreshAudit=(id:string)=>getAudit(id).then(setAudit).catch(()=>{});
@@ -60,7 +97,7 @@ export default function App() {
     setAgreementBusy(true);
     try{
       const result=await reviseAgreement(agreement.id,{expectedVersion:agreement.version,...draftTerms});
-      setAgreement(result.agreement);setLinks(result);setEditTerms(false);refreshAudit(result.agreement.id);
+      setAgreement(result.agreement);setPayment(null);setLinks(result);setEditTerms(false);refreshAudit(result.agreement.id);
       notify('New agreement version created. Previous approvals and links invalidated.');
     }catch(e){notify(e instanceof Error?e.message:'Revision failed');}
     finally{setAgreementBusy(false);}
@@ -121,7 +158,7 @@ export default function App() {
     setAgreementBusy(true);
     try {
       const created=await createAgreement(negotiationId,seller);
-      setAgreement(created.agreement);setLinks(created);window.localStorage.setItem('dealmesh-last-agreement',created.agreement.id);refreshAudit(created.agreement.id);setView('Agreements');
+      setAgreement(created.agreement);setPayment(null);setLinks(created);window.localStorage.setItem('dealmesh-last-agreement',created.agreement.id);refreshAudit(created.agreement.id);setView('Agreements');
       notify('Demo agreement drafted for review.');
     } catch(e) {notify(e instanceof Error ? e.message : 'Unable to draft agreement');}
     finally {setAgreementBusy(false);}
@@ -161,6 +198,14 @@ export default function App() {
         {!links && <p className="disclaimer">Approval links are only shown when an agreement version is created or revised. To issue new links, create a new version.</p>}
         <div className="agreement-actions"><div><strong>Agreement version</strong><small>Changing terms resets both approvals and invalidates previous links.</small><button className="secondary-btn" onClick={()=>{setDraftTerms({project:agreement.project,price:agreement.price,days:agreement.days,revisions:agreement.revisions});setEditTerms(true);}}>Revise terms</button></div></div>
         {editTerms && <div className="modal" style={{position:'relative',width:'100%',maxWidth:'100%',marginTop:16}}><h3>New agreement version</h3><form onSubmit={e=>{e.preventDefault();saveRevision();}}><label>Project<input required maxLength={200} value={draftTerms.project} onChange={e=>setDraftTerms({...draftTerms,project:e.target.value})}/></label><div className="form-grid"><label>Price USD<input required type="number" min="1" value={draftTerms.price} onChange={e=>setDraftTerms({...draftTerms,price:Number(e.target.value)})}/></label><label>Delivery days<input required type="number" min="1" value={draftTerms.days} onChange={e=>setDraftTerms({...draftTerms,days:Number(e.target.value)})}/></label></div><label>Revisions<input required type="number" min="0" max="20" value={draftTerms.revisions} onChange={e=>setDraftTerms({...draftTerms,revisions:Number(e.target.value)})}/></label><button className="primary-btn" type="submit" disabled={agreementBusy}>Save new version</button><button type="button" className="secondary-btn" onClick={()=>setEditTerms(false)}>Cancel</button></form></div>}
+        <div className="agreement-actions"><div style={{width:'100%'}}><strong>PayPal Sandbox checkout</strong><small>Only after both demo approvals. A separate buyer action is required. Sandbox only — no real funds.</small>
+        {paymentError && <p role="alert" className="disclaimer">{paymentError}</p>}
+        {payment && <p className="muted">Order {payment.orderId} · USD {payment.amount} · {payment.status}{payment.captureId?' · Capture '+payment.captureId:''}</p>}
+        {agreement.status==='DEMO_APPROVED' && !payment && <button className="primary-btn" disabled={paymentBusy} onClick={startPayment}>Create PayPal Sandbox order</button>}
+        {agreement.status==='DEMO_APPROVED' && payment && payment.status!=='COMPLETED' && <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:12}}><button className="secondary-btn" disabled={paymentBusy} onClick={continuePayment}>Continue on PayPal Sandbox</button><button className="primary-btn" disabled={paymentBusy} onClick={capturePayment}>I've approved on PayPal — capture payment</button></div>}
+        {agreement.status==='DEMO_APPROVED' && payment?.status==='COMPLETED' && <p className="muted">Sandbox payment captured successfully.</p>}
+        <button className="secondary-btn" style={{marginTop:12}} disabled={paymentBusy} onClick={()=>loadPayment(agreement.id)}>Refresh payment status</button>
+        </div></div>
         <div style={{marginTop:24}}><strong>Audit history</strong><button className="secondary-btn" style={{marginLeft:12}} onClick={()=>refreshAudit(agreement.id)}>Refresh history</button>{audit.map(event=><p className="muted" key={event.id}>{event.createdAt} · {event.event.replaceAll('_',' ')}</p>)}</div>
         <p className="disclaimer">DEMO ONLY: links are bearer credentials, not authenticated identities or legal signatures. Agreement versions and approvals persist in SQLite. Negotiation sessions still reset on backend restart. No PayPal payment is initiated.</p>
         </section> : <div className="empty-state"><div className="empty-icon"><FileCheck2 size={30}/></div><h3>No agreement drafted</h3><p>Finish an AI negotiation and choose a validated offer using “Draft agreement”.</p><button className="primary-btn" onClick={() => changeView('Negotiations')}>Review offers <ArrowRight size={17}/></button></div>)}</>}
