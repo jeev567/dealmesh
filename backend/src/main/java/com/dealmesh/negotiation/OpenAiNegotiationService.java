@@ -39,6 +39,7 @@ public class OpenAiNegotiationService {
    List<NegotiationTurn> turns=new ArrayList<>();
    for(SellerPolicy seller:policy.sellers()) {
      Offer current=propose(buyer,seller);
+     Offer best=null;
      for(int round=1;round<=4;round++) {
        if(!policy.isWithinSellerPolicy(current,seller)) {
          turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
@@ -47,29 +48,43 @@ public class OpenAiNegotiationService {
        }
        turns.add(new NegotiationTurn(seller.name(),"SELLER",current.explanation(),
          current.price(),current.days(),current.revisions(),round));
-       if(policy.isAcceptable(buyer,current,seller.minimumPrice())) {
-         winners.add(current);
-         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
-           "Offer meets both parties' constraints. Awaiting human review.",
-           current.price(),current.days(),current.revisions(),round));
-         break;
+       if(policy.isAcceptable(buyer,current,seller.minimumPrice()) &&
+          (best==null || current.price()<best.price() ||
+           (current.price()==best.price() && current.days()<best.days()))) {
+         best=current;
        }
-       if(round==4) {
-         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
-           "Negotiation ended without a compatible offer.",current.price(),current.days(),current.revisions(),round));
-         break;
-       }
+       // Even an acceptable initial proposal should be negotiated at least once.
+       // Stop when the seller has reached its minimum price or the round limit.
+       if(round==4 || (best!=null && current.price()<=seller.minimumPrice())) break;
        Offer counter=agentProposal(buyer,seller,current,"BUYER");
        if(counter.price()<1 || counter.price()>buyer.budget() || counter.days()<1 ||
           counter.days()>buyer.days() || counter.revisions()<buyer.revisions() ||
-          counter.revisions()>20) {
+          counter.revisions()>20 || counter.price()>=current.price()) {
          turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
-           "Buyer agent proposal rejected by buyer constraints.",counter.price(),counter.days(),counter.revisions(),round));
+           "Buyer counteroffer rejected: it must improve price and satisfy buyer constraints.",
+           counter.price(),counter.days(),counter.revisions(),round));
          break;
        }
        turns.add(new NegotiationTurn(seller.name(),"BUYER",counter.explanation(),
          counter.price(),counter.days(),counter.revisions(),round));
-       current=agentProposal(buyer,seller,counter,"SELLER");
+       Offer next=agentProposal(buyer,seller,counter,"SELLER");
+       // A seller cannot increase the price relative to its prior proposal.
+       if(next.price()>current.price()) {
+         turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+           "Seller counteroffer rejected: price increased.",next.price(),next.days(),next.revisions(),round));
+         break;
+       }
+       current=next;
+     }
+     if(best!=null) {
+       winners.add(best);
+       turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+         "Best validated offer: $"+best.price()+", "+best.days()+
+         " days, "+best.revisions()+" revisions. Awaiting human review.",
+         best.price(),best.days(),best.revisions(),4));
+     } else {
+       turns.add(new NegotiationTurn(seller.name(),"SYSTEM",
+         "No mutually acceptable offer reached.",current.price(),current.days(),current.revisions(),4));
      }
    }
    winners.sort(Comparator.comparingInt(Offer::price).thenComparingInt(Offer::days));
@@ -78,8 +93,8 @@ public class OpenAiNegotiationService {
 
  private Offer agentProposal(CreateRequest buyer,SellerPolicy seller,Offer previous,String role) {
    String instruction=role.equals("BUYER")
-     ? "You are a fictional BUYER agent. Counter the seller's latest offer with price <= buyer budget, delivery <= buyer deadline, and revisions >= buyer minimum. Negotiate for a lower price. Never commit or approve a purchase."
-     : "You are a fictional SELLER agent. Respond to the buyer counteroffer. You MUST respect your minimum price, earliest delivery time and maximum revisions. You may compromise but never violate seller constraints.";
+     ? "You are a fictional BUYER agent. Counter the seller's latest offer with price <= buyer budget, delivery <= buyer deadline, and revisions >= buyer minimum. Your price MUST be strictly lower than the previous seller offer. Prefer a meaningful discount but do not assume the seller will accept. Never commit or approve a purchase."
+     : "You are a fictional SELLER agent. Respond to the buyer counteroffer. You MUST respect your minimum price, earliest delivery time and maximum revisions. Your price MUST be at or below your previous seller offer. You may compromise but never violate seller constraints.";
    return requestOffer(seller.name(),instruction,
      "Project: "+buyer.title()+". Buyer maximum USD "+buyer.budget()+", deadline "+buyer.days()+
      " days, minimum revisions "+buyer.revisions()+". Seller "+seller.name()+
