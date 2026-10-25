@@ -3,6 +3,11 @@ server:
 spring:
   application:
     name: dealmesh
+  datasource:
+    url: ${DEALMESH_DB_URL:jdbc:sqlite:./dealmesh.db}
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
 management:
   endpoints:
     web:
