@@ -57,7 +57,7 @@ User=ec2-user
 WorkingDirectory=/var/lib/dealmesh
 Environment=DEALMESH_DB_URL=jdbc:sqlite:/var/lib/dealmesh/dealmesh.db
 Environment=DEALMESH_FRONTEND_URL=https://dealmesh-demo.duckdns.org
-Environment=JAVA_TOOL_OPTIONS=-Xms128m -Xmx768m
+Environment="JAVA_TOOL_OPTIONS=-Xms128m -Xmx768m"
 EnvironmentFile=-/etc/dealmesh.env
 ExecStart=/usr/bin/java -jar /opt/dealmesh/dealmesh.jar
 Restart=always
