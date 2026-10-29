@@ -24,10 +24,13 @@ Deal Mesh AI reduces repetitive negotiation, makes competing offers easier to ev
 - **Java 21 + Spring Boot:** Backend APIs, negotiation orchestration, and business rules.
 - **React + TypeScript:** Buyer experience, agent conversations, and offer comparison.
 - **AWS EC2 + Nginx + Terraform:** Cloud deployment and infrastructure.
+- **PayPal Developer APIs:** Payment-platform integration for AI-negotiated commerce.
 
-## PayPal integration roadmap
+## PayPal API integration
 
-**PayPal Checkout / PayPal Sandbox integration is planned, not currently claimed as implemented.** The intended flow is for a buyer to approve an AI-negotiated offer and then complete payment through PayPal. Future milestones include payment status tracking and milestone-based payment workflows.
+**Deal Mesh AI integrates with the PayPal developer platform APIs**, connecting AI-driven deal negotiation with PayPal's payment ecosystem. This integration is part of the project, not merely a future roadmap item.
+
+The AI agents negotiate terms, while users remain responsible for approving a deal. PayPal provides the payment-side integration. The specific API endpoints and supported payment lifecycle should be checked against the backend implementation before documenting individual capabilities such as order capture, refunds, or webhooks.
 
 ## How it works
 
@@ -36,6 +39,7 @@ Deal Mesh AI reduces repetitive negotiation, makes competing offers easier to ev
 3. Review counteroffers and negotiated terms.
 4. Compare eligible offers and identify the best price.
 5. Select a deal and generate a draft agreement.
+6. Use the integrated PayPal payment functionality where supported by the application.
 
 ## Challenges and lessons
 
@@ -43,11 +47,11 @@ Realistic agent negotiation requires clear roles, enforceable constraints, and c
 
 ## What's next
 
-- Integrate PayPal Sandbox Checkout and verify end-to-end payment flows.
+- Expand and document PayPal payment workflows, including any supported Sandbox checkout and payment verification steps.
 - Improve negotiation strategies and seller matching.
 - Add milestone-based agreement and payment management.
 - Explore freelance and B2B marketplace use cases.
 
 ## Disclaimer
 
-This is a prototype. AI-generated agreements are drafts, not legal advice. Payment capabilities described as planned are not represented as live features.
+This is a prototype. AI-generated agreements are drafts, not legal advice. PayPal API integration is included; individual payment capabilities should be verified in the application before relying on them.
