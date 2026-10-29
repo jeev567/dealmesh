@@ -15,6 +15,39 @@ echo "Deploying ONLY DealMesh instance: $INSTANCE_ID"
 read -r -p "Continue? [y/N] " CONFIRM
 [[ "$CONFIRM" == "y" || "$CONFIRM" == "Y" ]] || exit 0
 
+# Refresh DuckDNS from the instance's current AWS public IPv4 address.
+# Set DUCKDNS_TOKEN in your local shell; never commit it or pass it to the EC2 host.
+: "${DUCKDNS_TOKEN:?Set DUCKDNS_TOKEN in your Mac shell before deploying (see duckdns.org)}"
+PUBLIC_IP="$(aws ec2 describe-instances \
+  --instance-ids "$INSTANCE_ID" \
+  --region "$REGION" --profile "$PROFILE" \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
+if [[ -z "$PUBLIC_IP" || "$PUBLIC_IP" == "None" ]]; then
+  echo "ERROR: DealMesh instance has no public IPv4 address." >&2
+  exit 1
+fi
+export PUBLIC_IP DUCKDNS_TOKEN
+python3 - <<'PY_DUCKDNS'
+import ipaddress
+import os
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+ip = str(ipaddress.IPv4Address(os.environ["PUBLIC_IP"]))
+params = urlencode({
+    "domains": "dealmesh-demo",
+    "token": os.environ["DUCKDNS_TOKEN"],
+    "ip": ip,
+})
+# Keep the token out of deployment logs and GitHub.
+with urlopen("https://www.duckdns.org/update?" + params, timeout=20) as response:
+    result = response.read().decode("utf-8").strip()
+if result != "OK":
+    raise SystemExit("DuckDNS update failed; check token and domain ownership.")
+print(f"DuckDNS updated: dealmesh-demo.duckdns.org -> {ip}")
+PY_DUCKDNS
+unset DUCKDNS_TOKEN
+
 cd "$ROOT/backend"
 ./gradlew clean bootJar
 JAR="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"
