@@ -56,7 +56,7 @@ Wants=network-online.target
 User=ec2-user
 WorkingDirectory=/var/lib/dealmesh
 Environment=DEALMESH_DB_URL=jdbc:sqlite:/var/lib/dealmesh/dealmesh.db
-Environment=DEALMESH_FRONTEND_URL=http://dealmesh-demo.duckdns.org
+Environment=DEALMESH_FRONTEND_URL=https://dealmesh-demo.duckdns.org
 Environment=JAVA_TOOL_OPTIONS=-Xms128m -Xmx768m
 EnvironmentFile=-/etc/dealmesh.env
 ExecStart=/usr/bin/java -jar /opt/dealmesh/dealmesh.jar
@@ -66,10 +66,11 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SERVICE
+if [ ! -f /etc/nginx/conf.d/dealmesh.conf ]; then
 cat > /etc/nginx/conf.d/dealmesh.conf <<'NGINX'
 server {
     listen 80;
-    server_name dealmesh-demo.duckdns.org _;
+    server_name dealmesh-demo.duckdns.org;
     root /var/www/dealmesh;
     index index.html;
     location /api/ {
@@ -85,8 +86,10 @@ server {
     location / { try_files $uri $uri/ /index.html; }
 }
 NGINX
+fi
 systemctl daemon-reload
-systemctl enable --now dealmesh
+systemctl enable dealmesh
+systemctl restart dealmesh
 nginx -t
 systemctl reload nginx
 systemctl --no-pager status dealmesh
@@ -113,4 +116,4 @@ COMMAND_ID="$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name
 echo "SSM command: $COMMAND_ID"
 aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --region "$REGION" --profile "$PROFILE" || true
 aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --region "$REGION" --profile "$PROFILE" --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' --output json
-echo "HTTP deployment target: http://dealmesh-demo.duckdns.org (HTTPS setup is separate)"
+echo "Deployment target: https://dealmesh-demo.duckdns.org (requires existing HTTPS configuration)"
