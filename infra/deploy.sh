@@ -120,7 +120,68 @@ server {
 }
 NGINX
 fi
+# DuckDNS updater runs locally on EC2. The token is supplied once via
+# /etc/dealmesh-duckdns.token (root-only); it is never stored in Git.
+cat > /usr/local/sbin/dealmesh-duckdns-update <<'DUCKDNS_SCRIPT'
+#!/usr/bin/env python3
+import ipaddress
+from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+token_path = Path("/etc/dealmesh-duckdns.token")
+if not token_path.is_file():
+    raise SystemExit("DuckDNS token missing: create /etc/dealmesh-duckdns.token")
+token = token_path.read_text().strip()
+if not token:
+    raise SystemExit("DuckDNS token file is empty")
+
+# EC2 instance metadata service v2; no AWS credentials needed.
+base = "http://169.254.169.254/latest"
+with urlopen(Request(base + "/api/token", method="PUT",
+                     headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"}), timeout=5) as r:
+    metadata_token = r.read().decode()
+with urlopen(Request(base + "/meta-data/public-ipv4",
+                     headers={"X-aws-ec2-metadata-token": metadata_token}), timeout=5) as r:
+    ip = str(ipaddress.IPv4Address(r.read().decode().strip()))
+
+query = urlencode({"domains": "dealmesh-demo", "token": token, "ip": ip})
+with urlopen("https://www.duckdns.org/update?" + query, timeout=20) as r:
+    result = r.read().decode().strip()
+if result != "OK":
+    raise SystemExit("DuckDNS update failed (check domain and token)")
+print(f"DuckDNS updated dealmesh-demo.duckdns.org to {ip}")
+DUCKDNS_SCRIPT
+chmod 700 /usr/local/sbin/dealmesh-duckdns-update
+
+cat > /etc/systemd/system/dealmesh-duckdns.service <<'DUCKDNS_SERVICE'
+[Unit]
+Description=Update DealMesh DuckDNS from EC2 public IPv4
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/dealmesh-duckdns-update
+DUCKDNS_SERVICE
+
+cat > /etc/systemd/system/dealmesh-duckdns.timer <<'DUCKDNS_TIMER'
+[Unit]
+Description=Refresh DealMesh DuckDNS every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=dealmesh-duckdns.service
+
+[Install]
+WantedBy=timers.target
+DUCKDNS_TIMER
+
 systemctl daemon-reload
+systemctl enable --now dealmesh-duckdns.timer
 systemctl enable dealmesh
 systemctl restart dealmesh
 nginx -t
