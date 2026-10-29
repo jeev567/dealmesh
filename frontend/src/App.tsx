@@ -69,6 +69,7 @@ export default function App() {
     finally{setPaymentBusy(false);}
   };
   const [links,setLinks] = useState<ApprovalLinks|null>(null);
+  const [approvalSyncing,setApprovalSyncing] = useState(false);
   const [audit,setAudit] = useState<AuditEvent[]>([]);
   const [review,setReview] = useState<Review|null>(null);
   const [reviewError,setReviewError] = useState('');
@@ -111,12 +112,51 @@ export default function App() {
   },[]);
   const refreshAudit=(id:string)=>getAudit(id).then(setAudit).catch(()=>{});
   const reviewUrl=(token:string)=>window.location.origin+window.location.pathname+'?review='+encodeURIComponent(token);
-  const copyReview=async(token:string)=>{try{await navigator.clipboard.writeText(reviewUrl(token));notify('Review link copied. Keep it private.');}catch{notify('Copy failed. Check browser clipboard permissions.');}};
+  const openReview=(token:string)=>{
+    const popup=window.open(reviewUrl(token),'_blank');
+    if(!popup){notify('Pop-up blocked. Please allow pop-ups for DealMesh.');return;}
+    popup.focus();
+  };
+  // Poll for approval changes made in review tabs or on another device.
+  useEffect(()=>{
+    if(!agreement?.id || review || new URLSearchParams(window.location.search).has('review'))return;
+    let active=true;
+    let busy=false;
+    const sync=async()=>{
+      if(busy)return;
+      busy=true;
+      try{
+        const updated=await getAgreement(agreement.id);
+        if(active) setAgreement(current=>current?.id===updated.id ? updated : current);
+      }catch{/* Transient network failures should not hide the agreement. */}
+      finally{busy=false;}
+    };
+    const interval=window.setInterval(sync,2500);
+    const onFocus=()=>{void sync();};
+    const onMessage=(event:MessageEvent)=>{
+      if(event.origin!==window.location.origin || event.data?.type!=='dealmesh-review-approved' || event.data?.agreementId!==agreement.id)return;
+      setApprovalSyncing(true);
+      void sync().finally(()=>{setApprovalSyncing(false);refreshAudit(agreement.id);});
+    };
+    window.addEventListener('focus',onFocus);
+    window.addEventListener('message',onMessage);
+    return()=>{active=false;window.clearInterval(interval);window.removeEventListener('focus',onFocus);window.removeEventListener('message',onMessage);};
+  },[agreement?.id,review]);
+
   const submitReview=async()=>{
     const token=new URLSearchParams(window.location.search).get('review');
     if(!token||agreementBusy)return;
     setAgreementBusy(true);
-    try{await approveReview(token);setReview(await getReview(token));notify('Demo approval recorded.');}
+    try{
+      await approveReview(token);
+      const updated=await getReview(token);
+      setReview(updated);
+      notify('Demo approval recorded.');
+      if(window.opener && !window.opener.closed){
+        window.opener.postMessage({type:'dealmesh-review-approved',agreementId:updated.agreement.id},window.location.origin);
+        window.close();
+      }
+    }
     catch(e){setReviewError(e instanceof Error?e.message:'Approval failed');}
     finally{setAgreementBusy(false);}
   };
@@ -268,7 +308,7 @@ export default function App() {
         <div className="agreement-grid"><div><small>Fixed price</small><strong>{money(agreement.price)}</strong></div><div><small>Delivery</small><strong>{agreement.days} days</strong></div><div><small>Revisions</small><strong>{agreement.revisions}</strong></div></div>
         <p className="muted">These are the exact selected offer terms. Scope is represented only by the project title; detailed deliverables, acceptance criteria, and payment milestones are not yet specified.</p>
         <div className="agreement-hash"><small>SHA-256 terms fingerprint</small><code>{agreement.termsHash}</code></div>
-        <div className="agreement-actions"><div><strong>Buyer review</strong><small>{agreement.buyerApproved?'Demo approval recorded':'Separate private link required'}</small><button className="primary-btn" disabled={!links} onClick={()=>links&&copyReview(links.buyerToken)}>Copy buyer review link</button></div><div><strong>Fictional seller review</strong><small>{agreement.sellerDemoApproved?'Demo approval recorded':'Simulated role, separate private link'}</small><button className="secondary-btn" disabled={!links} onClick={()=>links&&copyReview(links.sellerDemoToken)}>Copy seller review link</button></div></div>
+        <div className="agreement-actions"><div><strong>Buyer review</strong><small>{agreement.buyerApproved?'Demo approval recorded':'Separate private link required'}</small><button className="primary-btn" disabled={!links} onClick={()=>links&&openReview(links.buyerToken)}>Open buyer review</button></div><div><strong>Fictional seller review</strong><small>{agreement.sellerDemoApproved?'Demo approval recorded':'Simulated role, separate private link'}</small><button className="secondary-btn" disabled={!links} onClick={()=>links&&openReview(links.sellerDemoToken)}>Open seller review</button></div></div>
         {!links && <p className="disclaimer">Approval links are only shown when an agreement version is created or revised. To issue new links, create a new version.</p>}
         <div className="agreement-actions"><div><strong>Agreement version</strong><small>Changing terms resets both approvals and invalidates previous links.</small><button className="secondary-btn" disabled={paymentLocked} title={paymentLocked?"Revisions locked once a PayPal order exists":undefined} onClick={()=>{setDraftTerms({project:agreement.project,price:agreement.price,days:agreement.days,revisions:agreement.revisions});setEditTerms(true);}}>{paymentLocked?"Terms locked after checkout":"Revise terms"}</button></div></div>
         {editTerms && <div className="modal" style={{position:'relative',width:'100%',maxWidth:'100%',marginTop:16}}><h3>New agreement version</h3><form onSubmit={e=>{e.preventDefault();saveRevision();}}><label>Project<input required maxLength={200} value={draftTerms.project} onChange={e=>setDraftTerms({...draftTerms,project:e.target.value})}/></label><div className="form-grid"><label>Price USD<input required type="number" min="1" value={draftTerms.price} onChange={e=>setDraftTerms({...draftTerms,price:Number(e.target.value)})}/></label><label>Delivery days<input required type="number" min="1" value={draftTerms.days} onChange={e=>setDraftTerms({...draftTerms,days:Number(e.target.value)})}/></label></div><label>Revisions<input required type="number" min="0" max="20" value={draftTerms.revisions} onChange={e=>setDraftTerms({...draftTerms,revisions:Number(e.target.value)})}/></label><button className="primary-btn" type="submit" disabled={agreementBusy}>Save new version</button><button type="button" className="secondary-btn" onClick={()=>setEditTerms(false)}>Cancel</button></form></div>}
@@ -284,7 +324,7 @@ export default function App() {
         {agreement.status==='DEMO_APPROVED' && !payment && <button className="primary-btn" disabled={paymentBusy} onClick={startPayment}>Create PayPal Sandbox order</button>}
         {agreement.status==='DEMO_APPROVED' && payment && payment.status!=='COMPLETED' && <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:12}}><button className="secondary-btn" disabled={paymentBusy} onClick={continuePayment}>Continue on PayPal Sandbox</button><button className="primary-btn" disabled={paymentBusy} onClick={capturePayment}>I've approved on PayPal — capture payment</button></div>}
 
-        <button className="secondary-btn" style={{marginTop:12}} disabled={paymentBusy} onClick={()=>loadPayment(agreement.id)}>Refresh payment status</button>
+        <button className="secondary-btn" style={{marginTop:12}} disabled={paymentBusy || approvalSyncing} onClick={()=>{void getAgreement(agreement.id).then(setAgreement);void loadPayment(agreement.id);}}>{approvalSyncing?"Updating approvals…":"Refresh payment status"}</button>
         </div></div>
         <div style={{marginTop:24}}><strong>Audit history</strong><button className="secondary-btn" style={{marginLeft:12}} onClick={()=>refreshAudit(agreement.id)}>Refresh history</button>{audit.map(event=><p className="muted" key={event.id}>{event.createdAt} · {event.event.replaceAll('_',' ')}</p>)}</div>
         <p className="disclaimer">DEMO ONLY: links are bearer credentials, not authenticated identities or legal signatures. Agreement versions and approvals persist in SQLite. Negotiation sessions still reset on backend restart. PayPal Sandbox checkout requires separate buyer authorization; no real funds are transferred.</p>
