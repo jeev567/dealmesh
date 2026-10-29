@@ -26,11 +26,24 @@ Deal Mesh AI reduces repetitive negotiation, makes competing offers easier to ev
 - **AWS EC2 + Nginx + Terraform:** Cloud deployment and infrastructure.
 - **PayPal Developer APIs:** Payment-platform integration for AI-negotiated commerce.
 
-## PayPal API integration
+## PayPal Sandbox integration (implemented)
 
-**Deal Mesh AI integrates with the PayPal developer platform APIs**, connecting AI-driven deal negotiation with PayPal's payment ecosystem. This integration is part of the project, not merely a future roadmap item.
+The backend integrates **PayPal OAuth 2.0** and **Checkout Orders API v2**, linking negotiated, human-approved agreements to actual Sandbox payment orders.
 
-The AI agents negotiate terms, while users remain responsible for approving a deal. PayPal provides the payment-side integration. The specific API endpoints and supported payment lifecycle should be checked against the backend implementation before documenting individual capabilities such as order capture, refunds, or webhooks.
+| PayPal API | Method | Purpose |
+| --- | --- | --- |
+| `/v1/oauth2/token` | POST | Obtain a Sandbox OAuth access token using server-side client credentials |
+| `/v2/checkout/orders` | POST | Create a USD order for the approved agreement amount (`intent: CAPTURE`) |
+| `/v2/checkout/orders/{orderId}` | GET | Retrieve order status and PayPal buyer approval URL |
+| `/v2/checkout/orders/{orderId}/capture` | POST | Capture the buyer-approved payment and persist the capture ID |
+
+**Approval guard:** Both buyer and seller demo approvals are required before order creation or capture. Payments are tied to a specific agreement version and persisted in SQLite. The backend uses PayPal request IDs for safer retries.
+
+**Implementation:** [PaypalSandboxController.java](backend/src/main/java/com/dealmesh/negotiation/PaypalSandboxController.java) and [frontend API client](frontend/src/api.ts).
+
+**AI integration:** [OpenAiNegotiationService.java](backend/src/main/java/com/dealmesh/negotiation/OpenAiNegotiationService.java) uses OpenAI (configured model defaults to `gpt-4o-mini`) to generate negotiation proposals and counteroffers. Deterministic policy checks validate seller limits and buyer requirements; AI output alone does not authorize payment.
+
+**Sandbox only:** These are test payments, not real-money transactions. Live Sandbox success requires valid credentials and a test buyer account.
 
 ## How it works
 
@@ -39,7 +52,7 @@ The AI agents negotiate terms, while users remain responsible for approving a de
 3. Review counteroffers and negotiated terms.
 4. Compare eligible offers and identify the best price.
 5. Select a deal and generate a draft agreement.
-6. Use the integrated PayPal payment functionality where supported by the application.
+6. After buyer and seller demo approvals, create a PayPal Sandbox order, approve it on PayPal, and capture the payment.
 
 ## Challenges and lessons
 
@@ -47,7 +60,7 @@ Realistic agent negotiation requires clear roles, enforceable constraints, and c
 
 ## What's next
 
-- Expand and document PayPal payment workflows, including any supported Sandbox checkout and payment verification steps.
+- Expand PayPal workflows with additional payment reconciliation, tests, and optional milestone payments.
 - Improve negotiation strategies and seller matching.
 - Add milestone-based agreement and payment management.
 - Explore freelance and B2B marketplace use cases.
@@ -55,3 +68,7 @@ Realistic agent negotiation requires clear roles, enforceable constraints, and c
 ## Disclaimer
 
 This is a prototype. AI-generated agreements are drafts, not legal advice. PayPal API integration is included; individual payment capabilities should be verified in the application before relying on them.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
