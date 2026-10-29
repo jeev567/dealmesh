@@ -6,8 +6,8 @@ output "public_ip" {
   value = aws_instance.dealmesh.public_ip
 }
 
-output "ssh_command" {
-  value = "ssh -i YOUR_KEY.pem ec2-user@${aws_instance.dealmesh.public_ip}"
+output "ssm_command" {
+  value = "aws ssm start-session --target ${aws_instance.dealmesh.id} --region ${var.aws_region} --profile dealseal-admin"
 }
 
 output "domain" {
